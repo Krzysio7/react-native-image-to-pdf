@@ -29,9 +29,9 @@ import java.io.FileDescriptor;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.logging.Logger;
+import android.os.AsyncTask;
 
 import static java.lang.String.format;
-
 
 public class RNImageToPdf extends ReactContextBaseJavaModule {
 
@@ -52,55 +52,8 @@ public class RNImageToPdf extends ReactContextBaseJavaModule {
 
     @ReactMethod
     public void createPDFbyImages(ReadableMap options, final Promise promise) {
-        ReadableArray images = options.getArray("imagePaths");
 
-        String documentName = options.getString("name");
-
-        ReadableMap maxSize = options.hasKey("maxSize") ? options.getMap("maxSize") : null;
-        int maxHeight = maxSize != null && maxSize.hasKey("height") ? maxSize.getInt("height") : 0;
-        int maxWidth = maxSize != null && maxSize.hasKey("width") ? maxSize.getInt("width") : 0;
-
-        int quality = options.hasKey("quality") ? (int)Math.round(100 * options.getDouble("quality")) : 0;
-
-        PdfDocument document = new PdfDocument();
-        try {
-
-            for (int idx = 0; idx < images.size(); idx++) {
-                // get image
-                Bitmap bmp = getImageFromFile(images.getString(idx));
-
-                // resize
-                bmp = resize(bmp, maxWidth, maxHeight);
-
-                // compress
-                bmp = compress(bmp, quality);
-
-                PageInfo pageInfo = new Builder(bmp.getWidth(), bmp.getHeight(), 1).create();
-
-                // start a page
-                Page page = document.startPage(pageInfo);
-
-                // add image to page
-                Canvas canvas = page.getCanvas();
-                canvas.drawBitmap(bmp, 0, 0, null);
-
-                document.finishPage(page);
-            }
-
-            // write the document content
-            File targetPath = reactContext.getExternalFilesDir(null);
-            File filePath = new File(targetPath, documentName);
-            document.writeTo(new FileOutputStream(filePath));
-            log.info(format("Wrote %,d bytes to %s", filePath.length(), filePath.getPath()));
-            WritableMap resultMap = Arguments.createMap();
-            resultMap.putString("filePath", filePath.getAbsolutePath());
-            promise.resolve(resultMap);
-        } catch (Exception e) {
-            promise.reject("failed", e);
-        }
-
-        // close the document
-        document.close();
+        new PdfAsyncTask(options, promise).execute();
     }
 
     private Bitmap getImageFromFile(String path) throws IOException {
@@ -114,7 +67,8 @@ public class RNImageToPdf extends ReactContextBaseJavaModule {
     }
 
     private Bitmap getImageFromContentResolver(String path) throws IOException {
-        ParcelFileDescriptor parcelFileDescriptor = reactContext.getContentResolver().openFileDescriptor(Uri.parse(path), "r");
+        ParcelFileDescriptor parcelFileDescriptor = reactContext.getContentResolver()
+                .openFileDescriptor(Uri.parse(path), "r");
         FileDescriptor fileDescriptor = parcelFileDescriptor.getFileDescriptor();
         Bitmap image = BitmapFactory.decodeFileDescriptor(fileDescriptor);
         parcelFileDescriptor.close();
@@ -122,24 +76,97 @@ public class RNImageToPdf extends ReactContextBaseJavaModule {
     }
 
     private Bitmap resize(Bitmap bitmap, int maxWidth, int maxHeight) {
-        if (maxWidth == 0 || maxHeight == 0) return bitmap;
-        if (bitmap.getWidth() <= maxWidth && bitmap.getHeight() <= maxHeight) return bitmap;
+        if (maxWidth == 0 || maxHeight == 0)
+            return bitmap;
+        if (bitmap.getWidth() <= maxWidth && bitmap.getHeight() <= maxHeight)
+            return bitmap;
 
         double aspectRatio = (double) bitmap.getHeight() / bitmap.getWidth();
-        int height = Math.round(maxWidth * aspectRatio) < maxHeight ? (int) Math.round(maxWidth * aspectRatio) : maxHeight;
+        int height = Math.round(maxWidth * aspectRatio) < maxHeight ? (int) Math.round(maxWidth * aspectRatio)
+                : maxHeight;
         int width = (int) Math.round(height / aspectRatio);
 
         return Bitmap.createScaledBitmap(bitmap, width, height, true);
     }
 
     private Bitmap compress(Bitmap bmp, int quality) throws IOException {
-        if (quality <= 0 || quality >= 100) return bmp;
+        if (quality <= 0 || quality >= 100)
+            return bmp;
 
         ByteArrayOutputStream stream = new ByteArrayOutputStream();
         bmp.compress(Bitmap.CompressFormat.JPEG, quality, stream);
         byte[] byteArray = stream.toByteArray();
         stream.close();
         return BitmapFactory.decodeByteArray(byteArray, 0, byteArray.length);
+    }
+
+    public class PdfAsyncTask extends AsyncTask<Void, Void, Void> {
+        private ReadableMap options;
+        private Promise promise;
+
+        public PdfAsyncTask(ReadableMap options, final Promise promise) {
+            this.options = options;
+            this.promise = promise;
+        }
+
+        @Override
+        protected Void doInBackground(Void... arg0) {
+            ReadableMap options = this.options;
+            Promise promise = this.promise;
+
+            // TODO Auto-generated method stub
+            ReadableArray images = options.getArray("imagePaths");
+
+            String documentName = options.getString("name");
+
+            ReadableMap maxSize = options.hasKey("maxSize") ? options.getMap("maxSize") : null;
+            int maxHeight = maxSize != null && maxSize.hasKey("height") ? maxSize.getInt("height") : 0;
+            int maxWidth = maxSize != null && maxSize.hasKey("width") ? maxSize.getInt("width") : 0;
+
+            int quality = options.hasKey("quality") ? (int) Math.round(100 * options.getDouble("quality")) : 0;
+
+            PdfDocument document = new PdfDocument();
+            try {
+
+                for (int idx = 0; idx < images.size(); idx++) {
+                    // get image
+                    Bitmap bmp = getImageFromFile(images.getString(idx));
+
+                    // resize
+                    bmp = resize(bmp, maxWidth, maxHeight);
+
+                    // compress
+                    bmp = compress(bmp, quality);
+
+                    PageInfo pageInfo = new Builder(bmp.getWidth(), bmp.getHeight(), 1).create();
+
+                    // start a page
+                    Page page = document.startPage(pageInfo);
+
+                    // add image to page
+                    Canvas canvas = page.getCanvas();
+                    canvas.drawBitmap(bmp, 0, 0, null);
+
+                    document.finishPage(page);
+                }
+
+                // write the document content
+                File targetPath = reactContext.getExternalFilesDir(null);
+                File filePath = new File(targetPath, documentName);
+                document.writeTo(new FileOutputStream(filePath));
+                log.info(format("Wrote %,d bytes to %s", filePath.length(), filePath.getPath()));
+                WritableMap resultMap = Arguments.createMap();
+                resultMap.putString("filePath", filePath.getAbsolutePath());
+                promise.resolve(resultMap);
+            } catch (Exception e) {
+                promise.reject("failed", e);
+            }
+
+            // close the document
+            document.close();
+            return null;
+        }
+
     }
 
 }
